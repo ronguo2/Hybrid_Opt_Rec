@@ -1,21 +1,23 @@
 """
-Enumeration method to find the optimal solution
+
 Objective function: Passenger time cost + passenger fare
 Constraint: Non-negative agency revenue
+Designing iterative algorithms to derive four types of passenger ratios, elastic demand, and cost components
+Enumeration method to find the optimal solution
 
 decision variable：
 x2:FareFlex_f2
 H1: HeadwayFixed_H1
 H2: HeadwayFlex_H2
 """
-# from cmath import log
-# from math import fabs
+from cmath import log
+from math import fabs
 import numpy as np
-# import pandas as pd
-# import matplotlib.pyplot as plt
-# import para    # set parameters
-# import funs
-# import time
+import pandas as pd
+import matplotlib.pyplot as plt
+import para    # set parameters
+import funs
+import time
 
 
 def ini_total_area_demand():
@@ -232,45 +234,16 @@ def evaluate_main(H1,H2, fare, potential_total_demand):
     MSA_data = []
     final_demand,final_utility = elastic_demand_Iteration(H1,H2, fare, potential_total_demand,MSA_data)
 
+    # The four types of ridership ratios and the corresponding cost components are derived
 
-    PassengerType_p1 = final_utility[:,9]
-    PassengerType_p2 = final_utility[:,10]
-    PassengerType_p3 = final_utility[:,11]
-    PassengerType_p4 = final_utility[:,12]
+    # Then, Calculate fleet size, user cost, agencycost, and agency revenue.
 
-    FlexType = PassengerType_p2+PassengerType_p3+PassengerType_p4
-
-    DistFixed_d1 = final_utility[:,13]
-    DistFlex_d2 = final_utility[:,14]
-
-
-    WalkTime_A = final_utility[:,6]
-    WaitTime_W = final_utility[:,7]
-    TravelTime_T = final_utility[:,8]
-
-    SingleFare = final_utility[:,-5]
-
-    TotalUserTime = WalkTime_A+WaitTime_W+TravelTime_T
-
-
-    FleetsizeFixed_m1 = DistFixed_d1/para.VehSpeed_v + 2*(para.StopFixed_N-1) * para.Time_lost/H1
-    FleetsizeFlex_m2 = DistFlex_d2/para.VehSpeed_v + 4*para.Time_pick*para.AreaSide_s*para.AreaLength_D*FlexType*final_demand
-    # operating costs
-    OperCostFixed_c1 = para.HourMoney_cveh * FleetsizeFixed_m1 + para.DistMoney_cdist * DistFixed_d1
-    OperCostflex_c2 = para.HourMoney_cveh * FleetsizeFlex_m2 + para.DistMoney_cdist * DistFlex_d2
-    AgencyCost_c = OperCostFixed_c1 + OperCostflex_c2
-
-    # agency revenue
-    TotalFare = 2 * para.AreaLength_D * para.AreaSide_s *final_demand* SingleFare
-
-    UserCost = TotalUserTime*para.value_time + SingleFare
-    AgencyProfit_pi = TotalFare - AgencyCost_c
 
     return # Output the values
 
 def Test_lamda(_Test_Save_Folder_Name: str):
 
-
+    #
     fare = np.array(np.arange(2, 20.1, 0.1))
     H1 = np.array(np.arange(0.01, 1.01, 0.01))
     H2 = np.array(np.arange(0.01, 1.01, 0.01))
@@ -290,5 +263,5 @@ def Test_lamda(_Test_Save_Folder_Name: str):
 
     ans = evaluate_main(H1,H2, fare, potential_total_demand)
 
-#   Filtering the optimal value of the optimization model
+#   Finally the enumeration method is used to filter the optimal values of the optimization model
 

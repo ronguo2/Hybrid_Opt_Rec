@@ -1,0 +1,354 @@
+"""
+Vectorization, iterative algorithm and enumeration method to find the optimal solution
+Objective function: user cost
+Constraint: Operator benefit is not less than 0
+
+decision variable：
+fare:FareFlex_f2
+H1: HeadwayFixed
+H2: HeadwayFlex
+"""
+
+import numpy as np
+import pandas as pd
+import para
+import funs
+import time
+
+start = time.time()
+def ini_total_area_demand():
+    """
+        set the intial travel demand
+        use the base demand as the intial value
+    """
+    fare = np.array(np.arange(1, 10.1, 0.1))
+    H1 = np.array(np.arange(0.01, 0.31, 0.01))
+    H2 = np.array(np.arange(0.01, 0.31, 0.01))
+    potential_total_demand = np.array(np.arange(20, 201, 20))
+    H2_len = len(H2)
+    H1_len = len(H1)
+    x2_len = len(fare)
+    demand = np.repeat(potential_total_demand, H1_len * x2_len * H2_len)
+    return demand
+    pass
+def ini_passenger_demand(demand):
+    """
+        set the intial passengers demand
+        evenly distributed the demand to each type of passngers
+    """
+    pas_type_flow = []   # ini demand for each type of passengers
+    PassengerType_p1 = 0.25*demand
+    PassengerType_p2 = 0.25*demand
+    PassengerType_p3 = 0.25*demand
+    PassengerType_p4 = 0.25*demand
+    FlexPassen = PassengerType_p2+PassengerType_p3+PassengerType_p4
+    pas_type_flow = np.stack([PassengerType_p1, PassengerType_p2, PassengerType_p3, PassengerType_p4, FlexPassen], axis=1)
+    return pas_type_flow
+    pass
+
+def cal_utility(H1,H2, fare ,FlexPassen,thet,AreaSide_s, AreaLength_D, beta):
+    """
+        given the headway, fare and demand
+        compute the cost element for each type of passengers
+    """
+    # fare
+    FareType1 = para.FareFixed_f1
+    FareType2 = fare+para.FareFixed_f1
+    FareType3 = FareType2
+    FareType4 = 2*fare+para.FareFixed_f1
+    FareType1 = np.repeat(FareType1, len(fare))
+
+    # operation distance
+    DistFixed_d1 = 2 *AreaLength_D / H1
+    DistFlex_d2 = 2.5 * AreaLength_D / H2 + 4 * AreaLength_D * AreaSide_s ** 2 * FlexPassen/ 3
+
+    # fleet size
+    StopFixed_N = AreaLength_D / (2 * AreaSide_s)
+    FleetsizeFixed_m1 = DistFixed_d1 / para.VehSpeed_v + 2 * (StopFixed_N) * para.Time_lost / H1
+    FleetsizeFlex_m2 = DistFlex_d2 / para.VehSpeed_v + 4 * para.Time_pick * AreaSide_s * AreaLength_D * FlexPassen
+
+    SpeedFixed = FleetsizeFixed_m1/para.VehSpeed_v
+    SpeedFlex = FleetsizeFlex_m2/para.VehSpeed_v
+
+    # user cost
+    WalkDist_l1 = AreaSide_s * 2
+    WalkDist_l2 = WalkDist_l1 / 2
+    WalkTime_A1 = WalkDist_l1 / para.WalkSpeed_vw
+    WalkTime_A2 = WalkDist_l2 / para.WalkSpeed_vw
+    WaitTime_W1 = H1 / 2
+    WaitTime_W2 = H2 / 2 + H1 / 2
+    WaitTime_W4 = H2 + H1 / 2
+    radio = DistFlex_d2 / (2 * AreaLength_D / H2)
+    TraDistFixed_r1 = 0.34 * AreaLength_D
+    TraDistFlex_r2 = radio * WalkDist_l2
+    TravTime_T1 = TraDistFixed_r1 / SpeedFixed
+    TravTime_T2 = TraDistFixed_r1/SpeedFixed + TraDistFlex_r2/ SpeedFlex
+    TravTime_T4 = TraDistFixed_r1/SpeedFixed + 2*TraDistFlex_r2/ SpeedFlex
+
+    # PSL model: four route choice
+    delta1j = 2
+    delta2j = 4
+    delta3j = 2
+    Segment1_walk = para.wA * WalkTime_A2* para.value_time
+    Segment2_fixed = ((para.wT * TraDistFixed_r1 / SpeedFixed) + para.wW * H1 / 2)* para.value_time + para.FareFixed_f1
+    Segment1_flex = ((para.wT * TraDistFlex_r2 / SpeedFlex) + para.wW * H2 / 2)* para.value_time + fare
+    Path1_total = (Segment1_walk * 2 + Segment2_fixed)
+    Path2_total = (Segment1_walk + Segment1_flex + Segment2_fixed)
+    Path4_total = (Segment1_flex * 2 + Segment2_fixed)
+    PS1 = (Segment1_walk * (1 / delta1j) + Segment2_fixed * (1 / delta2j) + Segment1_walk * (1 / delta1j)) / Path1_total
+    PS2 = (Segment1_walk * (1 / delta1j) + Segment2_fixed * (1 / delta2j) + Segment1_flex * (1 / delta3j)) / Path2_total
+    PS4 = (Segment1_flex * (1 / delta3j) + Segment2_fixed * (1 / delta2j) + Segment1_flex * (1 / delta3j)) / Path4_total
+    PSL_1 = np.exp(beta * np.log(PS1)) * np.exp(- thet * Path1_total)
+    PSL_2 = np.exp(beta * np.log(PS2)) * np.exp(- thet * Path2_total)
+    PSL_4 = np.exp(beta * np.log(PS4)) * np.exp(- thet * Path4_total)
+    TotalPSL = PSL_1 + PSL_2 * 2 + PSL_4
+    PassengerType_p1 = PSL_1 / TotalPSL
+    PassengerType_p2 = PSL_2 / TotalPSL
+    PassengerType_p3 = PSL_2 / TotalPSL
+    PassengerType_p4 = PSL_4 / TotalPSL
+
+    util_1 = (para.wA * WalkTime_A1 + para.wW * WaitTime_W1 + para.wT * TravTime_T1) * para.value_time + para.wf * FareType1
+    util_2 = (para.wA * WalkTime_A2 + para.wW * WaitTime_W2 + para.wT * TravTime_T2) * para.value_time + para.wf * FareType2
+    util_4 = (para.wW * WaitTime_W4 + para.wT * TravTime_T4) * para.value_time + para.wf * FareType4
+    Choice_1 = np.exp(- thet * util_1)
+    Choice_2 = np.exp(- thet * util_2)
+    Choice_3 = Choice_2
+    Choice_4 = np.exp(- thet * util_4)
+    TotalChoice = Choice_1 + Choice_2 * 2 + Choice_4
+
+    WalkTime_A = WalkTime_A1 * PassengerType_p1 + WalkTime_A2 * PassengerType_p2 * 2
+    WaitTime_W = WaitTime_W1 * PassengerType_p1 + WaitTime_W2 * PassengerType_p2 * 2 + WaitTime_W4 * PassengerType_p4
+    TravelTime_T = TravTime_T1 * PassengerType_p1 + TravTime_T2 * PassengerType_p2 * 2 + TravTime_T4 * PassengerType_p4
+    SingleFare = FareType1*PassengerType_p1+FareType2*PassengerType_p2*2+FareType4*PassengerType_p4
+    AverageUtility = (para.wA *WalkTime_A + para.wW * WaitTime_W +  para.wT *TravelTime_T) * para.value_time +para.wf *SingleFare
+
+    TraDistFixed_r1 = np.repeat(TraDistFixed_r1, len(fare))
+
+    travel_utility=np.stack([Choice_1, Choice_2, Choice_3, Choice_4,
+                             AverageUtility,TotalChoice,
+                             WalkTime_A,WaitTime_W,TravelTime_T,
+                             PassengerType_p1,PassengerType_p2,PassengerType_p3,PassengerType_p4,
+                             DistFixed_d1,DistFlex_d2,TraDistFixed_r1,TraDistFlex_r2,SingleFare,
+                             FareType1,FareType2,FareType3,FareType4,FleetsizeFixed_m1,FleetsizeFlex_m2,
+                             PSL_1,PSL_2,PSL_2,PSL_4,TotalPSL], axis=1)
+
+    return travel_utility
+
+def update_pass_demand(utility, demand):
+    """
+        update passenger type demand based on updated utility
+    """
+    update_pass_demand = []
+    PassengerType_p1 = utility[:,24] / utility[:,28]*demand
+    PassengerType_p2 = utility[:,25] / utility[:,28]*demand
+    PassengerType_p3 = utility[:,26] / utility[:,28]*demand
+    PassengerType_p4 = utility[:,27] / utility[:,28]*demand
+    FlexPassen = PassengerType_p2+PassengerType_p3+PassengerType_p4
+
+    update_pass_demand=np.stack([PassengerType_p1, PassengerType_p2,
+                                 PassengerType_p3, PassengerType_p4,FlexPassen], axis=1)
+
+    return update_pass_demand
+
+def compute_MSA_map_y1(x0 ,H1,H2 ,fare,demand,thet,AreaSide_s, AreaLength_D, beta):
+    """
+        x0 is the pass type demand for current iteration
+        y1 is the pass type demand updated
+    """
+    utility = cal_utility(H1, H2, fare, x0,thet,AreaSide_s, AreaLength_D, beta)
+    y1 = update_pass_demand(utility,demand)[:,-1]
+    return y1
+
+def check_MSA_convergence(X0 ,Y1):
+    """
+        compute the convergence for the MSA
+    """
+
+    gap = np.max(np.abs(Y1 - X0))  # update this based on the difference between the two
+    return gap
+
+def route_choice_equlibrium_MSA(demand ,H1,H2,fare,MSA_data,thet,AreaSide_s, AreaLength_D, beta):
+    """
+        under one demand setting, use MSA to compute the convergence of the route flow
+    """
+    # MSA_data = []
+    max_msa_iter = 100
+    # print(demand.shape)
+    x0 = ini_passenger_demand(demand)[:,-1]
+    # print('x00'+str(x0))
+    start=time.time()
+    for iter in range(1, max_msa_iter):
+        y1 = compute_MSA_map_y1(x0,H1,H2,fare,demand,thet,AreaSide_s, AreaLength_D, beta)
+        MSA_data.append([iter, check_MSA_convergence(x0, y1)])
+        print('MSA_gap: ',check_MSA_convergence(x0, y1))
+        if check_MSA_convergence(x0, y1) < 0.1:
+            break
+        else:
+            x0 = x0+ ( 1 /iter ) *(y1 -x0)
+    end = time.time()
+    print('MSA computing time: ', end-start)
+    df_MSA = pd.DataFrame(MSA_data,columns=['iter','gap'])
+    df_MSA.to_csv('result_MSA_gap_test_s_' + str(thet)+'.csv', encoding="utf-8", index=None)
+
+    # after convergence of the route choice compute utility
+    utility = cal_utility(H1,H2 ,fare ,x0,thet,AreaSide_s, AreaLength_D, beta)
+    return utility
+
+def elastic_demand_fun(utility, demand,thet,AreaSide_s, AreaLength_D, beta):
+    """
+        given utility compute the update demand
+    """
+    update_pass_demand = demand - para.psi * (-1 / thet) * (np.log(utility[:,5]))
+    return update_pass_demand
+
+def update_elastic_demand(current_elastic_demand,demand, H1,H2, fare,MSA_data,thet,AreaSide_s, AreaLength_D, beta):
+    """
+        update elastic demand
+    """
+    utility = route_choice_equlibrium_MSA(current_elastic_demand ,H1,H2 ,fare,MSA_data,thet,AreaSide_s, AreaLength_D, beta)
+
+    return (elastic_demand_fun(utility, demand,thet,AreaSide_s, AreaLength_D, beta))
+
+def compute_elastic_demand_gap(last_demand, update_demand,H1, H2, fare):
+    """
+        the gap is defined by the difference between the two iterations
+    """
+    gap = np.max(np.abs(update_demand - last_demand))
+    return gap
+def elastic_demand_Iteration(H1,H2, fare, demand,MSA_data,thet,AreaSide_s, AreaLength_D, beta):
+    """
+        iterative procedure for the elastic demand
+    """
+    ElasIteration_data = []
+    iter = 0
+    max_iter =100
+    target_gap = 0.001
+    x0 = ini_total_area_demand()
+    y1 = update_elastic_demand(x0,demand,H1,H2, fare,MSA_data,thet,AreaSide_s, AreaLength_D, beta)
+    gap = compute_elastic_demand_gap(x0, y1,H1, H2, fare)
+    start = time.time()
+    while gap > target_gap and iter < max_iter:
+        x0 = y1
+        y1 = update_elastic_demand(x0,demand, H1,H2, fare,MSA_data,thet,AreaSide_s, AreaLength_D, beta)
+        gap = compute_elastic_demand_gap(x0, y1,H1, H2, fare)
+        print('Elastic_gap: ',gap)
+        iter = iter + 1
+        ElasIteration_data.append([iter, gap])
+    end = time.time()
+    print('Elastic Iteration time: ', end-start)
+    df_ElasIteration = pd.DataFrame(ElasIteration_data, columns=['iter', 'gap'])
+    df_ElasIteration.to_csv('result_ElasIteration_gap_test_s_' + str(thet) +'.csv', encoding="utf-8", index=None)
+
+    final_demand = update_elastic_demand(y1,demand,H1,H2, fare,MSA_data,thet,AreaSide_s, AreaLength_D, beta)
+    final_utility = route_choice_equlibrium_MSA(final_demand, H1,H2, fare,MSA_data,thet,AreaSide_s, AreaLength_D, beta)
+    # after convergence return the demand and uitlity
+    return final_demand, final_utility
+    pass
+
+
+def evaluate_main(H1,H2, fare, potential_total_demand,thet,AreaSide_s, AreaLength_D, beta):
+    """
+        evaluate one enumerate setting
+        the demand input is potential demand
+    """
+
+    MSA_data = []
+    final_demand,final_utility = elastic_demand_Iteration(H1,H2, fare, potential_total_demand,MSA_data,thet,AreaSide_s, AreaLength_D, beta)
+
+    # The final output
+    PassengerType_p1 = final_utility[:,9]
+    PassengerType_p2 = final_utility[:,10]
+    PassengerType_p3 = final_utility[:,11]
+    PassengerType_p4 = final_utility[:,12]
+    FlexType = PassengerType_p2+PassengerType_p3+PassengerType_p4
+
+    DistFixed_d1 = final_utility[:,13]
+    DistFlex_d2 = final_utility[:,14]
+    FleetsizeFixed_m1 = final_utility[:,22]
+    FleetsizeFlex_m2 = final_utility[:,23]
+
+    WalkTime_A = final_utility[:,6]
+    WaitTime_W = final_utility[:,7]
+    TravelTime_T = final_utility[:,8]
+    SingleFare = final_utility[:,17]
+    TotalUserTime = WalkTime_A+WaitTime_W+TravelTime_T
+
+    # operating costs
+    OperCostFixed_c1 = para.HourMoney_cveh * FleetsizeFixed_m1 + para.DistMoney_cdist * DistFixed_d1
+    OperCostflex_c2 = para.HourMoney_cveh * FleetsizeFlex_m2 + 0.8*para.DistMoney_cdist * DistFlex_d2
+    AgencyCost_c = OperCostFixed_c1 + OperCostflex_c2
+
+    # agency revenue
+    TotalFare = 2 * AreaLength_D * AreaSide_s *final_demand* SingleFare
+
+    UserCost = TotalUserTime*para.value_time + SingleFare
+    AgencyProfit_pi = TotalFare - AgencyCost_c
+
+    FareType1 = final_utility[:,18]
+    FareType2 = final_utility[:,19]
+    FareType3 = final_utility[:,20]
+    FareType4 = final_utility[:,21]
+
+    return np.stack([potential_total_demand, final_demand, fare, H1, H2,
+                     PassengerType_p1, PassengerType_p2, PassengerType_p3, PassengerType_p4, FlexType,
+                     UserCost, AgencyProfit_pi, TotalUserTime, TotalFare, AgencyCost_c,
+                     DistFixed_d1, DistFlex_d2, FleetsizeFixed_m1, FleetsizeFlex_m2,
+                     WalkTime_A, WaitTime_W, TravelTime_T,
+                     FareType1, FareType2, FareType3, FareType4], axis=1)
+
+def Test_lamda(_Test_Save_Folder_Name: str):
+    """
+        List all the results and find the optimal solution that satisfies the operator's revenue constraint
+    """
+
+    # Vectorization
+    fare = np.array(np.arange(1, 10.1, 0.1))
+    H1 = np.array(np.arange(0.01, 0.31, 0.01))
+    H2 = np.array(np.arange(0.01, 0.31, 0.01))
+    potential_total_demand = np.array(np.arange(20, 201, 20))
+    H2_len = len(H2)
+    H1_len = len(H1)
+    x2_len = len(fare)
+    Passenger_len = len(potential_total_demand)
+    H2 = np.tile(H2, H1_len * x2_len * Passenger_len)
+    H1 = np.tile(H1, x2_len * Passenger_len)
+    H1 = np.repeat(H1, H2_len)
+    fare = np.tile(fare, Passenger_len)
+    fare = np.repeat(fare, H2_len * H1_len)
+    potential_total_demand = np.repeat(potential_total_demand, H1_len * x2_len * H2_len)
+
+    # Parameters, sensitivity analysis
+    for i in np.arange(1, 2, 1):
+        thet = i / 10
+        for j in np.arange(6, 7, 2):
+            AreaSide_s = j / 10
+            for k in np.arange(20, 21, 5):
+                AreaLength_D = k
+                for n in np.arange(10, 11, 10):
+                    beta = n / 10
+                    df = pd.DataFrame(
+                        columns=['Passenger', 'Elastic', 'opt_flexfare', 'opt_H1', 'opt_H2',
+                                 'PassengerType_p1', 'PassengerType_p2', 'PassengerType_p3', 'PassengerType_p4',
+                                 'FlexType',
+                                 'UserCost', 'AgencyProfit_pi', 'TotalUserTime', 'TotalFare', 'AgencyCost_c',
+                                 'DistFixed_d1', 'DistFlex_d2', 'FleetsizeFixed_m1', 'FleetsizeFlex_m2',
+                                 'WalkTime_A', 'WaitTime_W', 'TravelTime_T',
+                                 'FareType1', 'FareType2', 'FareType3', 'FareType4'])
+
+                    ans = evaluate_main(H1, H2, fare, potential_total_demand, thet, AreaSide_s, AreaLength_D, beta)
+                    df = df.append(pd.DataFrame(ans, columns=df.columns))
+                    df_min = df[df['AgencyProfit_pi'] > 0]
+                    df_opt = df_min.groupby(by=['Passenger'])['UserCost'].min().reset_index()
+                    df_optmin = df[(df['Passenger'].isin(np.array(df_opt['Passenger']))) & (
+                        df['UserCost'].isin(np.array(df_opt['UserCost'])))]
+                    df_optmin.to_excel('main_test_PSClen' + '_thet' + str(i) + '_s' + str(j) + '_D' + str(k) + '_beta' + str(n) + '.xlsx', encoding="utf-8", index=None)
+
+    funs.BackUpScripts(_Test_Save_Folder_Name)
+
+if __name__ == "__main__":
+    Test_lamda("main_enum_test")
+
+end = time.time()
+
+print("time:%.2f s" % (end - start))
+print('finish')
